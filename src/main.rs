@@ -3,11 +3,12 @@
 use std::fs::File;
 use std::io::prelude::*;
 
-mod tokenizer;
+mod scan;
 
 fn main() {
     let content = read_json_file("test.json");
-    let tokens = tokenizer::tokenize(content);
+    let mut scanner = scan::Scanner::new();
+    let tokens = scanner.scan(content);
 
     for token in tokens {
         println!("{:?}", token);
