@@ -119,8 +119,8 @@ impl Scanner {
                             column: self.column,
                         }),
                         Err(message) => {
-                            self.synch_after_newline(&mut chars);
                             self.error_handler.add_error(message, self.position());
+                            self.synch_after_newline(&mut chars);
                             None
                         }
                     }
@@ -129,8 +129,8 @@ impl Scanner {
                     let bool_or_number = match self.json_alphanumeric(&mut chars, char) {
                         Ok(bool_or_number) => Some(bool_or_number),
                         Err(message) => {
-                            self.synch_after_newline(&mut chars);
                             self.error_handler.add_error(message, self.position());
+                            self.synch_after_newline(&mut chars);
                             None
                         }
                     };
@@ -164,6 +164,7 @@ impl Scanner {
 
     fn json_string(&mut self, chars: &mut Chars) -> Result<String, String> {
         let mut result_string = String::new();
+        let err_msg = String::from("Unterminated string");
         loop {
             self.column += 1;
             match chars.next() {
@@ -171,17 +172,11 @@ impl Scanner {
                     return Ok(result_string);
                 }
                 Some('\n') => {
-                    self.line += 1;
-                    self.column = 1;
-                    self.error_handler
-                        .add_error("Unterminated string literal".to_string(), self.position());
+                    return Err(err_msg);
                 }
                 Some(char) => result_string.push(char),
                 None => {
-                    return Err(format!(
-                        "Unterminated string at {}:{}",
-                        self.line, self.column
-                    ));
+                    return Err(err_msg);
                 }
             }
         }
@@ -234,5 +229,55 @@ impl Scanner {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::read_json_file;
+
+    fn setup() -> Scanner {
+        Scanner::new(ScannerErrorHandler::new())
+    }
+
+    fn base_check_no_errors(json: String) {
+        let scanner = setup();
+
+        let result = scanner.scan(json);
+        match result {
+            Ok(tokens) => true,
+            Err(error_handler) => {
+                error_handler.print_errors();
+                panic!("Invalid input");
+            }
+        };
+    }
+
+    #[test]
+    fn all_valid_tokens() {
+        base_check_no_errors(read_json_file("scan_test_data/all_valid_tokens.json"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn unterminated_str() {
+        base_check_no_errors("\"This is an unterminated string\n".to_string());
+    }
+
+    #[test]
+    fn correct_lineno_for_unterminted_str() {
+        let scanner = setup();
+        let result = scanner.scan(read_json_file(
+            "scan_test_data/error_at_correct_location.json",
+        ));
+
+        let error_handler = result.unwrap_err();
+
+        let first_error = &error_handler.errors[0];
+
+        error_handler.print_errors();
+        assert_eq!(first_error.line, 4);
+        assert_eq!(first_error.column, 38);
     }
 }

@@ -1,7 +1,7 @@
 [
     "one123,;'",
     123456789,
-    true,
+    "error here because unterminated,
     false,
     {}
 ]
