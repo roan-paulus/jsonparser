@@ -4,7 +4,9 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::process::ExitCode;
 
+mod parser;
 mod scan;
+mod types;
 
 fn main() -> ExitCode {
     let content = read_json_file("test.json");
@@ -31,5 +33,5 @@ fn read_json_file(file_path: &str) -> String {
     let mut content = String::new();
     let _ = json_file.read_to_string(&mut content);
 
-    return content;
+    content
 }
