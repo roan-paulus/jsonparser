@@ -22,9 +22,9 @@ impl ScannerErrorHandler {
     }
 
     pub fn print_errors(&self) {
-        for error in self.errors.iter() {
-            println!("{} at {}:{}", error.message, error.line, error.column);
-        }
+        self.errors.iter().for_each(|error| {
+            eprintln!("{} at {}:{}", error.message, error.line, error.column);
+        })
     }
 
     fn add_error(&mut self, message: String, location: (UnsignedInt, UnsignedInt)) {
@@ -105,6 +105,14 @@ impl Scanner {
                         }
                     }
                 }
+                'n' => match self.json_null(&mut chars) {
+                    Ok(token) => Some(token),
+                    Err(message) => {
+                        self.error_handler.add_error(message, self.position());
+                        self.synch_after_newline(&mut chars);
+                        None
+                    }
+                },
                 char if char.is_alphanumeric() => match self.json_alphanumeric(&mut chars, char) {
                     Ok(bool_or_number) => Some(bool_or_number),
                     Err(message) => {
@@ -212,6 +220,28 @@ impl Scanner {
         };
     }
 
+    fn json_null(&self, chars: &mut Peekable<Chars>) -> Result<Token, String> {
+        let mut letter_stack = vec!['l', 'l', 'u']; // null in reverse for pop()
+
+        while let Some(last) = letter_stack.pop() {
+            if let Some(c) = chars.peek() {
+                if *c == last {
+                    chars.next();
+                    continue;
+                }
+            } else {
+                return Err("Iterator exhausted".to_string());
+            }
+        }
+
+        Ok(Token {
+            lexeme: "null".to_string(),
+            token_type: TokenType::Null,
+            line: self.line,
+            column: self.column,
+        })
+    }
+
     fn position(&self) -> (UnsignedInt, UnsignedInt) {
         (self.line, self.column)
     }
@@ -230,7 +260,7 @@ impl Scanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::read_json_file;
+    use jsonparser::read_json_file;
 
     fn setup() -> Scanner {
         Scanner::new(ScannerErrorHandler::new())

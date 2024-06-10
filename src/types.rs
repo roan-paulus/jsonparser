@@ -8,9 +8,10 @@ pub enum TokenType {
     String,
     Bool,
     Number,
+    Null,
 }
 
-pub type UnsignedInt = u16;
+pub type UnsignedInt = u32;
 
 #[derive(Debug)]
 pub struct Token {
