@@ -24,13 +24,13 @@ type ValueResult = Result<Value, ParseError>;
 type Tokens<'a> = Peekable<Iter<'a, Token>>;
 
 pub fn parse(tokens: Vec<Token>) -> ValueResult {
-    let tokens: Tokens = tokens.iter().peekable();
-    value(tokens)
+    let mut tokens: Tokens = tokens.iter().peekable();
+    value(&mut tokens)
 }
 
 const VALID_TOKEN_MSG: &str = "Tokenized value should be valid";
 
-fn value(mut tokens: Tokens) -> ValueResult {
+fn value(tokens: &mut Tokens) -> ValueResult {
     if let Some(token) = tokens.next() {
         match token.token_type {
             // Scalar json types
@@ -54,23 +54,45 @@ fn value(mut tokens: Tokens) -> ValueResult {
     Err(ParseError::NoTokens)
 }
 
-fn array(mut tokens: Tokens) -> ValueResult {
-    // array = '[' value (, value)* ']'
+fn array(tokens: &mut Tokens) -> ValueResult {
+    // array = '[' value? (, value)* ']'
     let mut json_array: Vec<Value> = Vec::new();
 
+    let first_value: Option<Value>;
     if let Some(token) = tokens.peek() {
-        match token.token_type {
-            TokenType::ClosingBrace => {
-                tokens.next();
-                return Ok(Value::Array(json_array));
+        match value(tokens) {
+            Ok(val) => json_array.push(val),
+            Err(_) => return Ok(Value::Array(json_array)),
+        }
+    } else {
+        return Ok(Value::Array(json_array));
+    }
+
+    loop {
+        if let Some(token) = tokens.peek() {
+            if !matches!(token.token_type, TokenType::Comma) {
+                break;
             }
-            TokenType::OpeningSquirly => {
-                return Err(ParseError::UnexpectedToken(token.lexeme.clone()))
+        }
+
+        if let Some(token) = tokens.peek() {
+            match token.token_type {
+                TokenType::ClosingBrace => {
+                    tokens.next();
+                    return Ok(Value::Array(json_array));
+                }
+                TokenType::ClosingSquirly => {
+                    return Err(ParseError::UnexpectedToken(token.lexeme.clone()))
+                }
+                _ => {
+                    json_array.push(value(tokens)?);
+                    continue;
+                }
             }
-            _ => json_array.push(value(tokens)?),
         }
     }
-    Err(ParseError::NoTokens)
+
+    Ok(Value::Array(json_array))
 }
 
 #[cfg(test)]
@@ -196,11 +218,12 @@ mod tests {
     }
 
     #[test]
-    fn parses_array_with_one_value() {
+    fn parses_array_with_one_value() -> Result<(), ParseError> {
         let tokens = generate_array(|| vec![null_token()]);
-        let json_value = parse(tokens).unwrap();
+        let json_value: Value = parse(tokens)?;
         match json_value {
-            Value::Array(v) => assert_eq!(*v.first().unwrap(), Value::Null),
+            Value::Array(v) if v.first() == Some(Value::Null).as_ref() => Ok(()),
+            Value::Array(v) => panic!("Array but with no values, array: {:?}", v),
             v => panic!("Not an array, value: {:?}", v),
         }
     }
