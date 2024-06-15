@@ -1,4 +1,4 @@
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub enum TokenType {
     Comma,
     OpeningBrace,
@@ -19,4 +19,15 @@ pub struct Token {
     pub token_type: TokenType,
     pub line: UnsignedInt,
     pub column: UnsignedInt,
+}
+
+impl Clone for Token {
+    fn clone(&self) -> Self {
+        Self {
+            lexeme: self.lexeme.clone(),
+            token_type: self.token_type.clone(),
+            line: self.line,
+            column: self.column,
+        }
+    }
 }

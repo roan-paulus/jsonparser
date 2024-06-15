@@ -16,7 +16,7 @@ pub enum Value {
 #[derive(Debug)]
 pub enum ParseError {
     NoTokens,
-    UnknownToken,
+    UnknownToken(String),
     UnexpectedToken(String),
 }
 
@@ -48,7 +48,7 @@ fn value(tokens: &mut Tokens) -> ValueResult {
             // Compound json types
             TokenType::OpeningBrace => return array(tokens),
 
-            _ => return Err(ParseError::UnknownToken),
+            _ => return Err(ParseError::UnknownToken(token.lexeme.clone())),
         };
     }
     Err(ParseError::NoTokens)
@@ -75,14 +75,15 @@ fn array(tokens: &mut Tokens) -> ValueResult {
             }
         }
 
-        if let Some(token) = tokens.peek() {
+        if let Some(token) = tokens.peek().cloned() {
             match token.token_type {
                 TokenType::ClosingBrace => {
                     tokens.next();
                     return Ok(Value::Array(json_array));
                 }
                 TokenType::ClosingSquirly => {
-                    return Err(ParseError::UnexpectedToken(token.lexeme.clone()))
+                    tokens.next();
+                    return Err(ParseError::UnexpectedToken(token.lexeme.clone()));
                 }
                 _ => {
                     json_array.push(value(tokens)?);
@@ -104,10 +105,13 @@ mod tests {
     /// This serves as a quik way to create arrays for testing purposes.
     /// If no inner tokens are requires pass 'Vec::New' as an argument.
     ///
-    ///
     /// # Example
     ///
-    /// [ token1, token2, token3 ]
+    /// ```rust
+    /// let arr = generate_array(|| null_token());
+    /// assert!(arr.len() == 3);
+    /// ```
+    /// Output: `[Value::Null, Value::Null, Value::Null]`
     fn generate_array<F>(inner_tokens: F) -> Vec<Token>
     where
         F: FnOnce() -> Vec<Token>,
@@ -127,6 +131,18 @@ mod tests {
             column: 2,
         }])
         .collect::<Vec<Token>>()
+    }
+
+    fn insert_comma_after(token: Token) -> Vec<Token> {
+        vec![
+            token,
+            Token {
+                lexeme: ",".to_string(),
+                token_type: TokenType::Comma,
+                line: 1,
+                column: 1,
+            },
+        ]
     }
 
     /// Returns a token with TokenType::Null
@@ -153,7 +169,7 @@ mod tests {
         if json == Value::String("string".to_string()) {
             return Ok(());
         }
-        Err(ParseError::UnknownToken)
+        Err(ParseError::NoTokens)
     }
 
     #[test]
@@ -169,7 +185,7 @@ mod tests {
         if json == Value::Null {
             return Ok(());
         }
-        Err(ParseError::UnknownToken)
+        Err(ParseError::NoTokens)
     }
 
     #[test]
@@ -226,5 +242,25 @@ mod tests {
             Value::Array(v) => panic!("Array but with no values, array: {:?}", v),
             v => panic!("Not an array, value: {:?}", v),
         }
+    }
+
+    #[test]
+    fn parses_array_with_three_values() {
+        let null_comma = insert_comma_after(null_token());
+        let null_comma_two = null_comma.clone();
+        let null_comma_three = null_comma.clone();
+
+        let tokens: Vec<Token> = null_comma
+            .into_iter()
+            .chain(null_comma_two)
+            .chain(null_comma_three)
+            .collect();
+
+        let tokens = generate_array(|| tokens);
+        let json_value: Value = parse(tokens).unwrap();
+        assert_eq!(
+            json_value,
+            Value::Array(vec![Value::Null, Value::Null, Value::Null])
+        );
     }
 }
