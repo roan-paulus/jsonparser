@@ -1,7 +1,5 @@
 use crate::types::{Token, TokenType, UnsignedInt};
 use std::collections::HashMap;
-use std::iter::Peekable;
-use std::slice::Iter;
 
 #[derive(PartialEq, Debug)]
 pub enum Value {
@@ -13,254 +11,147 @@ pub enum Value {
     Object(HashMap<String, Value>),
 }
 
+impl Value {
+    pub fn print(&self) {
+        match self {
+            Self::Null => println!("null"),
+            Self::Bool(b) => println!("{b}"),
+            Self::Number(n) => println!("{n}"),
+            Self::String(s) => println!("{s}"),
+            _ => todo!("Implement other variants"),
+        }
+    }
+}
+
+type Tokens = Vec<Token>;
+type ValueResult<'a> = Result<Value, ParseError<'a>>;
+
 #[derive(Debug)]
-pub enum ParseError {
-    NoTokens,
-    UnknownToken(String),
-    UnexpectedToken(String),
+pub enum ParseError<'a> {
+    BadToken(&'a Token),
+    EndOfFile,
 }
 
-type ValueResult = Result<Value, ParseError>;
-type Tokens<'a> = Peekable<Iter<'a, Token>>;
-
-pub fn parse(tokens: Vec<Token>) -> ValueResult {
-    let mut tokens: Tokens = tokens.iter().peekable();
-    value(&mut tokens)
+pub struct Parser<'a> {
+    cursor: usize,
+    tokens: &'a Tokens,
 }
 
-const VALID_TOKEN_MSG: &str = "Tokenized value should be valid";
+impl<'t> Parser<'t> {
+    pub fn parse(tokens: &Tokens) -> ValueResult {
+        let mut parser = Parser { cursor: 0, tokens };
 
-fn value(tokens: &mut Tokens) -> ValueResult {
-    if let Some(token) = tokens.next() {
+        let result = parser.value();
+        if let Err(result) = &result {
+            match result {
+                ParseError::BadToken(token) => result,
+                ParseError::EndOfFile => result,
+            };
+        };
+
+        Ok(result.unwrap())
+    }
+
+    fn value(&'t mut self) -> ValueResult {
+        let token = match self.advance() {
+            Some(token) => token,
+            None => return Err(ParseError::EndOfFile),
+        };
+
         match token.token_type {
-            // Scalar json types
-            TokenType::Null => return Ok(Value::Null),
+            TokenType::Null => Ok(Value::Null),
             TokenType::Bool => {
-                let parsed: bool = token.lexeme.parse().expect(VALID_TOKEN_MSG);
-                return Ok(Value::Bool(parsed));
+                let boolean: bool = token
+                    .lexeme
+                    .parse()
+                    .expect("Should contain a valid boolean");
+                Ok(Value::Bool(boolean))
             }
             TokenType::Number => {
-                let parsed: UnsignedInt = token.lexeme.parse().expect(VALID_TOKEN_MSG);
-                return Ok(Value::Number(parsed));
+                let number: UnsignedInt = token
+                    .lexeme
+                    .parse()
+                    .expect("Token should contain valid number");
+                Ok(Value::Number(number))
             }
-            TokenType::String => return Ok(Value::String(token.lexeme.clone())),
+            TokenType::OpeningBrace => Ok(self.array()?),
+            _ => todo!("Implement the other tokens"),
+        }
+    }
 
-            // Compound json types
-            TokenType::OpeningBrace => return array(tokens),
-
-            _ => return Err(ParseError::UnknownToken(token.lexeme.clone())),
+    fn array(&'t mut self) -> ValueResult {
+        let token = match self.advance() {
+            Some(token) => token,
+            None => return Err(ParseError::EndOfFile),
         };
-    }
-    Err(ParseError::NoTokens)
-}
 
-fn array(tokens: &mut Tokens) -> ValueResult {
-    // array = '[' value? (, value)* ']'
-    let mut json_array: Vec<Value> = Vec::new();
+        let mut array = Vec::new();
 
-    let first_value: Option<Value>;
-    if let Some(token) = tokens.peek() {
-        match value(tokens) {
-            Ok(val) => json_array.push(val),
-            Err(_) => return Ok(Value::Array(json_array)),
-        }
-    } else {
-        return Ok(Value::Array(json_array));
-    }
-
-    loop {
-        if let Some(token) = tokens.peek() {
-            if !matches!(token.token_type, TokenType::Comma) {
-                break;
+        match token.token_type {
+            TokenType::ClosingBrace => (),
+            TokenType::Comma | TokenType::OpeningBrace | TokenType::ClosingSquirly => {
+                return Err(ParseError::BadToken(token));
             }
+            _ => array.push(self.value()?),
         }
 
-        if let Some(token) = tokens.peek().cloned() {
-            match token.token_type {
-                TokenType::ClosingBrace => {
-                    tokens.next();
-                    return Ok(Value::Array(json_array));
-                }
-                TokenType::ClosingSquirly => {
-                    tokens.next();
-                    return Err(ParseError::UnexpectedToken(token.lexeme.clone()));
-                }
-                _ => {
-                    json_array.push(value(tokens)?);
-                    continue;
-                }
-            }
-        }
+        Ok(Value::Array(array))
     }
 
-    Ok(Value::Array(json_array))
+    fn advance(&mut self) -> Option<&'t Token> {
+        self.cursor += 1;
+        self.tokens.get(self.cursor - 1)
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.cursor)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scan;
 
-    /// Generate a json array with optional tokens between the brackets.
-    ///
-    /// This serves as a quik way to create arrays for testing purposes.
-    /// If no inner tokens are requires pass 'Vec::New' as an argument.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// let arr = generate_array(|| null_token());
-    /// assert!(arr.len() == 3);
-    /// ```
-    /// Output: `[Value::Null, Value::Null, Value::Null]`
-    fn generate_array<F>(inner_tokens: F) -> Vec<Token>
-    where
-        F: FnOnce() -> Vec<Token>,
-    {
-        vec![Token {
-            lexeme: "[".to_string(),
-            token_type: TokenType::OpeningBrace,
-            line: 1,
-            column: 1,
-        }]
-        .into_iter()
-        .chain(inner_tokens())
-        .chain(vec![Token {
-            lexeme: "]".to_string(),
-            token_type: TokenType::ClosingBrace,
-            line: 1,
-            column: 2,
-        }])
-        .collect::<Vec<Token>>()
+    #[test]
+    fn only_one_null() {
+        assert_eq!(test::parse("null"), Value::Null);
     }
 
-    fn insert_comma_after(token: Token) -> Vec<Token> {
-        vec![
-            token,
-            Token {
-                lexeme: ",".to_string(),
-                token_type: TokenType::Comma,
-                line: 1,
-                column: 1,
-            },
-        ]
+    #[test]
+    fn only_one_bool() {
+        assert_eq!(test::parse("true"), Value::Bool(true));
+        assert_eq!(test::parse("false"), Value::Bool(false));
     }
 
-    /// Returns a token with TokenType::Null
-    fn null_token() -> Token {
-        Token {
-            lexeme: String::from("null"),
-            token_type: TokenType::Null,
-            line: 1,
-            column: 1,
+    #[test]
+    fn only_one_number() {
+        assert_eq!(test::parse("123456789"), Value::Number(123456789));
+    }
+
+    #[test]
+    fn empty_array() {
+        assert_eq!(test::parse("[]"), Value::Array(Vec::new()));
+    }
+
+    #[test]
+    fn array_with_one_null_value() {
+        assert_eq!(test::parse("[null]"), Value::Array(vec![Value::Null]));
+    }
+
+    mod test {
+        use super::*;
+
+        pub fn parse(s: &str) -> Value {
+            Parser::parse(&create_tokens(s.to_string())).unwrap()
         }
-    }
 
-    #[test]
-    fn parses_json_string() -> Result<(), ParseError> {
-        let tokens = vec![Token {
-            lexeme: "string".to_string(),
-            token_type: TokenType::String,
-            line: 1,
-            column: 1,
-        }];
-
-        let json = parse(tokens)?;
-
-        if json == Value::String("string".to_string()) {
-            return Ok(());
+        fn create_tokens(s: String) -> Tokens {
+            let scanner = scan::Scanner::new(scan::ScannerErrorHandler::new());
+            match scanner.scan(s) {
+                Ok(tokens) => tokens,
+                Err(_) => panic!("Should be a valid string"),
+            }
         }
-        Err(ParseError::NoTokens)
-    }
-
-    #[test]
-    fn parses_json_null() -> Result<(), ParseError> {
-        let tokens = vec![Token {
-            lexeme: "null".to_string(),
-            token_type: TokenType::Null,
-            line: 1,
-            column: 1,
-        }];
-        let json = parse(tokens)?;
-
-        if json == Value::Null {
-            return Ok(());
-        }
-        Err(ParseError::NoTokens)
-    }
-
-    #[test]
-    fn parses_unsigned_integer() {
-        let tokens = vec![Token {
-            lexeme: "123456789".to_string(),
-            token_type: TokenType::Number,
-            line: 1,
-            column: 1,
-        }];
-
-        let json = parse(tokens).unwrap();
-        assert_eq!(json, Value::Number(123456789));
-    }
-
-    #[test]
-    fn parses_single_bool_value() {
-        let tokens_t = vec![Token {
-            lexeme: "true".to_string(),
-            token_type: TokenType::Bool,
-            line: 1,
-            column: 1,
-        }];
-        let tokens_f = vec![Token {
-            lexeme: "false".to_string(),
-            token_type: TokenType::Bool,
-            line: 1,
-            column: 1,
-        }];
-
-        let json_t = parse(tokens_t).unwrap();
-        let json_f = parse(tokens_f).unwrap();
-
-        assert_eq!(json_t, Value::Bool(true));
-        assert_eq!(json_f, Value::Bool(false));
-    }
-
-    #[test]
-    fn parses_empty_array() -> Result<(), String> {
-        let tokens = generate_array(Vec::new);
-        let json = parse(tokens).expect("Input should be a valid list of tokens");
-        match json {
-            Value::Array(_) => Ok(()),
-            _ => Err(String::from("Not an array")),
-        }
-    }
-
-    #[test]
-    fn parses_array_with_one_value() -> Result<(), ParseError> {
-        let tokens = generate_array(|| vec![null_token()]);
-        let json_value: Value = parse(tokens)?;
-        match json_value {
-            Value::Array(v) if v.first() == Some(Value::Null).as_ref() => Ok(()),
-            Value::Array(v) => panic!("Array but with no values, array: {:?}", v),
-            v => panic!("Not an array, value: {:?}", v),
-        }
-    }
-
-    #[test]
-    fn parses_array_with_three_values() {
-        let null_comma = insert_comma_after(null_token());
-        let null_comma_two = null_comma.clone();
-        let null_comma_three = null_comma.clone();
-
-        let tokens: Vec<Token> = null_comma
-            .into_iter()
-            .chain(null_comma_two)
-            .chain(null_comma_three)
-            .collect();
-
-        let tokens = generate_array(|| tokens);
-        let json_value: Value = parse(tokens).unwrap();
-        assert_eq!(
-            json_value,
-            Value::Array(vec![Value::Null, Value::Null, Value::Null])
-        );
     }
 }

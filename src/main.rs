@@ -2,6 +2,8 @@
 
 use std::process;
 
+use parser::Parser;
+
 mod parser;
 mod scan;
 mod types;
@@ -20,4 +22,11 @@ fn main() {
     };
 
     tokens.iter().for_each(|token| println!("{:?}", token));
+
+    let jvalue = match Parser::parse(&tokens) {
+        Ok(jvalue) => jvalue,
+        Err(err) => panic!("{:?}", err),
+    };
+
+    jvalue.print();
 }
